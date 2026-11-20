@@ -34,7 +34,7 @@ main{width:min(100%,540px)}.brand{display:flex;align-items:center;gap:14px;margi
 <script>
 (() => {
   const params = new URLSearchParams(location.search);
-  const server = params.get("server") || "";
+  const server = params.get("server") || location.origin;
   const key = params.get("key") || "";
   const form = document.getElementById("sendForm");
   const input = document.getElementById("pkgUrl");
