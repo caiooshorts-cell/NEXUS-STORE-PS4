@@ -1,4 +1,4 @@
-name: PS4 homebrew build check
+name: NEXUS STORE PS4 build
 
 on:
   workflow_dispatch:
@@ -12,42 +12,70 @@ permissions:
   contents: read
 
 jobs:
-  prepare-sample:
+  prepare-build-inputs:
     runs-on: ubuntu-latest
     steps:
-      - name: Download official OpenOrbis sample, shared headers and build tools
+      - name: Download official PS4 build tools and SDL2
         run: |
           set -eu
-          mkdir -p bundle/ps4/hello_world bundle/ps4/_common bundle/tools
-          curl -fL https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/archive/refs/heads/master.tar.gz -o /tmp/openorbis.tar.gz
-          tar -xzf /tmp/openorbis.tar.gz -C /tmp
-          cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/hello_world/. bundle/ps4/hello_world/
-          cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/_common/. bundle/ps4/_common/
-          sed -i 's|eboot.bin sce_sys/about/right.sprx |eboot.bin |' bundle/ps4/hello_world/Makefile
-
+          mkdir -p bundle/tools/bin/linux bundle/sdk
           curl -fL https://github.com/OpenOrbis/create-fself/releases/latest/download/binaries.tar.gz -o /tmp/create-fself.tar.gz
           tar -xzf /tmp/create-fself.tar.gz -C bundle/tools
-
           curl -fL https://github.com/OpenOrbis/create-gp4/releases/latest/download/binaries.tar.gz -o /tmp/create-gp4.tar.gz
           tar -xzf /tmp/create-gp4.tar.gz -C bundle/tools
-
           curl -fL https://github.com/maxton/LibOrbisPkg/releases/download/v0.2/PkgTool.Core-linux-x64-0.2.231.zip -o /tmp/pkgtool.zip
           unzip -o /tmp/pkgtool.zip -d bundle/tools/bin/linux
+          curl -fL https://github.com/OpenOrbis/SDL-PS4/releases/latest/download/SDL2.tar.gz -o /tmp/SDL2.tar.gz
+          tar -xzf /tmp/SDL2.tar.gz -C bundle/sdk
           chmod +x bundle/tools/bin/linux/create-fself bundle/tools/bin/linux/create-gp4 bundle/tools/bin/linux/PkgTool.Core
-          test -f bundle/tools/bin/linux/create-fself
-          test -f bundle/tools/bin/linux/create-gp4
-          test -f bundle/tools/bin/linux/PkgTool.Core
 
-      - name: Upload sample source and build tools
+      - name: Generate NEXUS STORE package icon
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import struct, zlib, os
+          w = h = 512
+          rows = bytearray()
+          for y in range(h):
+              rows.append(0)
+              for x in range(w):
+                  glow = max(0.0, 1.0 - (((x-390)**2 + (y-80)**2) ** 0.5) / 520.0)
+                  r = int(5 + 5*glow + 5*y/h)
+                  g = int(16 + 32*glow + 12*y/h)
+                  b = int(31 + 62*glow + 22*y/h)
+                  frame = (55 <= x < 457 and 55 <= y < 457 and
+                           (x < 64 or x >= 448 or y < 64 or y >= 448))
+                  diagonal_center = 190 + int((y-126) * 132 / 260)
+                  mark = (130 <= x < 190 and 126 <= y < 386) or \
+                         (322 <= x < 382 and 126 <= y < 386) or \
+                         (126 <= y < 386 and diagonal_center-30 <= x < diagonal_center+30)
+                  if frame:
+                      r, g, b = 24, 155, 220
+                  if mark:
+                      r, g, b = 48, 211, 235
+                  rows.extend((r, g, b, 255))
+          def chunk(kind, data):
+              return (struct.pack(">I", len(data)) + kind + data +
+                      struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff))
+          png = (b"\\x89PNG\\r\\n\\x1a\\n" +
+                 chunk(b"IHDR", struct.pack(">2I5B", w, h, 8, 6, 0, 0, 0)) +
+                 chunk(b"IDAT", zlib.compress(bytes(rows), 9)) +
+                 chunk(b"IEND", b""))
+          os.makedirs("bundle", exist_ok=True)
+          with open("bundle/icon0.png", "wb") as f:
+              f.write(png)
+          PY
+
+      - name: Upload build inputs
         uses: actions/upload-artifact@v4
         with:
-          name: openorbis-build-inputs
+          name: nexus-store-build-inputs
           path: bundle/
           if-no-files-found: error
           retention-days: 1
 
   build-pkg:
-    needs: prepare-sample
+    needs: prepare-build-inputs
     runs-on: ubuntu-latest
     container:
       image: openorbisofficial/toolchain:v0.5.1
@@ -56,37 +84,44 @@ jobs:
       - name: Checkout NEXUS STORE
         uses: actions/checkout@v4
 
-      - name: Download prepared source and build tools
+      - name: Download build inputs
         uses: actions/download-artifact@v4
         with:
-          name: openorbis-build-inputs
+          name: nexus-store-build-inputs
           path: build-inputs
 
-      - name: Install official OpenOrbis build tools
+      - name: Install SDL2 and official package tools
         run: |
           set -eu
-          mkdir -p ps4 /lib/OpenOrbisSDK/bin/linux
-          cp -R build-inputs/ps4/. ps4/
+          cp -R build-inputs/sdk/. /lib/OpenOrbisSDK/
           install -m 0755 build-inputs/tools/bin/linux/create-fself /lib/OpenOrbisSDK/bin/linux/create-fself
           install -m 0755 build-inputs/tools/bin/linux/create-gp4 /lib/OpenOrbisSDK/bin/linux/create-gp4
-          cp -R build-inputs/tools/bin/linux/. /lib/OpenOrbisSDK/bin/linux/
-          chmod +x /lib/OpenOrbisSDK/bin/linux/create-fself /lib/OpenOrbisSDK/bin/linux/create-gp4 /lib/OpenOrbisSDK/bin/linux/PkgTool.Core
-          test -x /lib/OpenOrbisSDK/bin/linux/create-fself
-          test -x /lib/OpenOrbisSDK/bin/linux/create-gp4
-          test -x /lib/OpenOrbisSDK/bin/linux/PkgTool.Core
+          install -m 0755 build-inputs/tools/bin/linux/PkgTool.Core /lib/OpenOrbisSDK/bin/linux/PkgTool.Core
+          test -f /lib/OpenOrbisSDK/include/SDL2/SDL.h
+          SDL_LIB="$(find /lib/OpenOrbisSDK/lib -maxdepth 2 -type f -name 'libSDL2.a' -print -quit)"
+          test -n "$SDL_LIB"
+          mkdir -p ps4/nexus_store/sce_sys ps4/nexus_store/sce_module
+          cp build-inputs/icon0.png ps4/nexus_store/sce_sys/icon0.png
+          for module in libc.prx libSceFios2.prx; do
+            if [ -f "/lib/OpenOrbisSDK/bin/data/modules/$module" ]; then
+              cp "/lib/OpenOrbisSDK/bin/data/modules/$module" ps4/nexus_store/sce_module/
+            fi
+          done
 
-      - name: Compile sample and create PKG
+      - name: Compile NEXUS STORE and create PKG
         run: |
           set -eu
-          make -C ps4/hello_world
+          make -C ps4/nexus_store clean
+          make -C ps4/nexus_store
           mkdir -p dist
-          find ps4/hello_world -maxdepth 1 -type f -name '*.pkg' -exec cp {} dist/ \;
+          find ps4/nexus_store -maxdepth 1 -type f -name '*.pkg' -exec cp {} dist/ \\;
           test -n "$(find dist -maxdepth 1 -type f -name '*.pkg' -print -quit)"
+          ls -lh dist/*.pkg
 
-      - name: Upload smoke-test PKG
+      - name: Upload NEXUS STORE PKG
         uses: actions/upload-artifact@v4
         with:
-          name: nexus-store-openorbis-smoke-test
+          name: nexus-store-ps4-preview
           path: dist/*.pkg
           if-no-files-found: error
           retention-days: 7

@@ -1,17 +1,15 @@
 # NEXUS STORE — cliente nativo PS4
 
-Esta pasta inicia a etapa do cliente homebrew para PS4. O painel web e o catálogo `catalog.json` continuam na raiz e no GitHub Pages.
+## Primeira versão nativa
+- Interface SDL2 em tela cheia, desenhada para 1920×1080.
+- Navegação pelas áreas Início, Jogos, Aplicativos, Emuladores e Ferramentas.
+- Entrada por DualShock 4 (direcional, X, O, L1 e R1).
+- Teclas do teclado também funcionam como apoio durante testes.
+- Tela inicial identificada como demonstração enquanto o catálogo remoto não estiver conectado.
 
-## Objetivo do cliente
-- Ler o catálogo remoto publicado no GitHub Pages.
-- Exibir jogos e detalhes em português.
-- Navegar com o DualShock 4.
-- Baixar PKGs diretamente da URL externa para o armazenamento interno.
-- Mostrar progresso e velocidade; retomar somente quando o servidor aceitar HTTP Range.
-- Validar tamanho e SHA-256 quando o catálogo fornecer esses dados.
+## Próxima etapa
+Ligar o cliente ao `catalog.json` publicado no GitHub Pages e implementar busca, detalhes e downloads autorizados com progresso, velocidade, retomada condicionada a HTTP Range e validação SHA-256.
 
-## Estado
-Ainda não há um PKG instalável nesta etapa. O próximo commit adicionará o código-fonte e o workflow OpenOrbis; o artefato só será considerado pronto depois de uma compilação bem-sucedida no GitHub Actions e teste no console.
+O PKG de preview precisa ser compilado no workflow e depois testado no console real. A compatibilidade com GoldHEN/firmware deve ser confirmada no PS4.
 
-## Segurança
-Use somente arquivos homebrew e conteúdos que você tenha autorização para distribuir. Não inclua tokens, senhas ou URLs privadas no repositório.
+Use somente homebrew e arquivos que você tenha autorização para distribuir. Não contorne DRM nem distribua jogos comerciais sem autorização.
