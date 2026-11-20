@@ -95,6 +95,10 @@ static std::string gLastMessage = "PRONTO PARA CONECTAR";
 static bool gOnline = false;
 static std::mutex gBgftMutex;
 static int gBgftModule = -1;
+static int gUserServiceModule = -1;
+static int gAppInstUtilModule = -1;
+static bool gUserServiceInitialized = false;
+static bool gAppInstUtilInitialized = false;
 static bool gBgftInitialized = false;
 static std::vector<unsigned char> gBgftHeap;
 
@@ -116,7 +120,7 @@ struct BgftDownloadParams {
     const char* releaseDate;
     const char* packageType;
     const char* packageSubType;
-    uint64_t packageSize;
+    uint32_t packageSize;
 };
 static_assert(offsetof(BgftDownloadParams, packageSize) == 96, "BGFT parameter ABI mismatch");
 static_assert(sizeof(BgftDownloadParams) == 104, "BGFT parameter ABI mismatch");
@@ -416,6 +420,50 @@ static std::string bgftErrorCode(int rc)
     return code;
 }
 
+// Internal PS4 modules must be requested by their sysmodule ID. Loading
+// "/system/common/lib/libSceBgft.sprx" as an ordinary file returns ENOENT
+// on retail firmware. Once loaded, find the module handle and resolve exports.
+static int findLoadedNativeModule(const char* name)
+{
+    OrbisKernelModule handles[256] = {};
+    size_t count = 0;
+    int rc = sceKernelGetModuleList(handles,sizeof(handles),&count);
+    if(rc!=0) return -1;
+    if(count>256) count=256;
+
+    for(size_t i=0;i<count;++i) {
+        OrbisKernelModuleInfo info;
+        memset(&info,0,sizeof(info));
+        info.size=sizeof(info);
+        if(sceKernelGetModuleInfo(handles[i],&info)!=0) continue;
+        if(strstr(info.name,name)!=NULL) return (int)handles[i];
+    }
+    return -1;
+}
+
+static bool loadInternalModule(int moduleId,const char* name,int& module,std::string& error)
+{
+    module=findLoadedNativeModule(name);
+    if(module>=0) return true;
+
+    int rc=sceSysmoduleLoadModuleInternal(moduleId);
+    if(rc!=0) {
+        // Check once more in case another system component loaded it while
+        // the sysmodule request was being processed.
+        module=findLoadedNativeModule(name);
+        if(module>=0) return true;
+        error=std::string("NAO FOI POSSIVEL CARREGAR ")+name+" PELO SYSMODULE: "+bgftErrorCode(rc);
+        return false;
+    }
+
+    module=findLoadedNativeModule(name);
+    if(module<0) {
+        error=std::string(name)+" FOI SOLICITADO, MAS NAO APARECEU NA LISTA DE MODULOS DO PS4.";
+        return false;
+    }
+    return true;
+}
+
 template<typename T>
 static T resolveBgftSymbol(int module,const char* name)
 {
@@ -425,22 +473,60 @@ static T resolveBgftSymbol(int module,const char* name)
     return function;
 }
 
+using UserServiceInitFn = int (*)(void*);
+using GetForegroundUserFn = int (*)(int*);
+using AppInstUtilInitFn = int (*)();
+
+static bool initializeUserService(std::string& error)
+{
+    if(gUserServiceInitialized) return true;
+    if(!loadInternalModule(0x80000011,"libSceUserService",gUserServiceModule,error)) return false;
+
+    UserServiceInitFn initialize=resolveBgftSymbol<UserServiceInitFn>(gUserServiceModule,"sceUserServiceInitialize");
+    if(!initialize) {
+        error="NAO FOI POSSIVEL RESOLVER sceUserServiceInitialize.";
+        return false;
+    }
+    int rc=initialize(NULL);
+    if(rc!=0) {
+        error="FALHA AO INICIAR O SERVICO DE USUARIO: "+bgftErrorCode(rc);
+        return false;
+    }
+    gUserServiceInitialized=true;
+    return true;
+}
+
+static bool initializeAppInstUtil(std::string& error)
+{
+    if(gAppInstUtilInitialized) return true;
+    if(!loadInternalModule(0x80000014,"libSceAppInstUtil",gAppInstUtilModule,error)) return false;
+
+    AppInstUtilInitFn initialize=resolveBgftSymbol<AppInstUtilInitFn>(gAppInstUtilModule,"sceAppInstUtilInitialize");
+    if(!initialize) {
+        error="NAO FOI POSSIVEL RESOLVER sceAppInstUtilInitialize.";
+        return false;
+    }
+    int rc=initialize();
+    if(rc!=0) {
+        error="FALHA AO INICIAR O SERVICO DE INSTALACAO: "+bgftErrorCode(rc);
+        return false;
+    }
+    gAppInstUtilInitialized=true;
+    return true;
+}
+
 static bool initializeBgft(std::string& error)
 {
     std::lock_guard<std::mutex> lock(gBgftMutex);
     if(gBgftInitialized) return true;
+    if(!loadInternalModule(0x8000002A,"libSceBgft",gBgftModule,error)) return false;
 
-    gBgftModule=sceKernelLoadStartModule("/system/common/lib/libSceBgft.sprx",0,NULL,0,NULL,NULL);
-    if(gBgftModule<0) {
-        error="NAO FOI POSSIVEL CARREGAR O SERVICO NATIVO BGFT: "+bgftErrorCode(gBgftModule);
-        return false;
-    }
-
-    gBgftInit=resolveBgftSymbol<BgftInitFn>(gBgftModule,"sceBgftServiceInit");
+    // OpenOrbis names this export sceBgftServiceIntInit (not sceBgftServiceInit).
+    gBgftInit=resolveBgftSymbol<BgftInitFn>(gBgftModule,"sceBgftServiceIntInit");
     gBgftRegisterPkg=resolveBgftSymbol<BgftRegisterPkgFn>(gBgftModule,"sceBgftServiceIntDebugDownloadRegisterPkg");
     gBgftStartTask=resolveBgftSymbol<BgftStartTaskFn>(gBgftModule,"sceBgftServiceDownloadStartTask");
     if(!gBgftInit || !gBgftRegisterPkg || !gBgftStartTask) {
-        error="O BGFT DO PS4 NAO EXPOS OS METODOS NECESSARIOS.";
+        error="O MODULO BGFT FOI CARREGADO, MAS NAO FOI POSSIVEL RESOLVER TODAS AS FUNCOES.";
         return false;
     }
 
@@ -457,21 +543,14 @@ static bool initializeBgft(std::string& error)
     return true;
 }
 
-// Registra a URL diretamente no serviço de downloads/instalação do sistema.
+// Registra a URL diretamente no serviço nativo de downloads/instalação do PS4.
 // Não usa Remote Package Installer nem a porta TCP 12800.
 static bool submitInstall(const std::string& url,const std::string& packageName,std::string& result)
 {
-    if(!initializeBgft(result)) return false;
-
-    // OpenOrbis 0.5.1 declares this export as an empty stub. Resolve the
-    // real PS4 ABI dynamically (int function(int* userId)) instead.
-    using GetForegroundUserFn = int (*)(int*);
-    int userModule=sceKernelLoadStartModule("/system/common/lib/libSceUserService.sprx",0,NULL,0,NULL,NULL);
-    if(userModule<0) {
-        result="NAO FOI POSSIVEL CARREGAR O SERVICO DE USUARIO: "+bgftErrorCode(userModule);
+    if(!initializeUserService(result) || !initializeAppInstUtil(result) || !initializeBgft(result))
         return false;
-    }
-    GetForegroundUserFn getForegroundUser=resolveBgftSymbol<GetForegroundUserFn>(userModule,"sceUserServiceGetForegroundUser");
+
+    GetForegroundUserFn getForegroundUser=resolveBgftSymbol<GetForegroundUserFn>(gUserServiceModule,"sceUserServiceGetForegroundUser");
     int userId=-1;
     if(!getForegroundUser || getForegroundUser(&userId)!=0 || userId<0) {
         result="ENTRE EM UM PERFIL DO PS4 ANTES DE INSTALAR.";
