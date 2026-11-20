@@ -20,7 +20,6 @@
 #include <vector>
 #include <cstdint>
 #include <orbis/libkernel.h>
-#include <orbis/UserService.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -464,9 +463,17 @@ static bool submitInstall(const std::string& url,const std::string& packageName,
 {
     if(!initializeBgft(result)) return false;
 
+    // OpenOrbis 0.5.1 declares this export as an empty stub. Resolve the
+    // real PS4 ABI dynamically (int function(int* userId)) instead.
+    using GetForegroundUserFn = int (*)(int*);
+    int userModule=sceKernelLoadStartModule("/system/common/lib/libSceUserService.sprx",0,NULL,0,NULL,NULL);
+    if(userModule<0) {
+        result="NAO FOI POSSIVEL CARREGAR O SERVICO DE USUARIO: "+bgftErrorCode(userModule);
+        return false;
+    }
+    GetForegroundUserFn getForegroundUser=resolveBgftSymbol<GetForegroundUserFn>(userModule,"sceUserServiceGetForegroundUser");
     int userId=-1;
-    int userResult=sceUserServiceGetForegroundUser(&userId);
-    if(userResult!=0 || userId<0) {
+    if(!getForegroundUser || getForegroundUser(&userId)!=0 || userId<0) {
         result="ENTRE EM UM PERFIL DO PS4 ANTES DE INSTALAR.";
         return false;
     }
