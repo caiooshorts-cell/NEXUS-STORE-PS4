@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: openorbisofficial/toolchain:latest
+      options: --user 0
     steps:
       - name: Checkout NEXUS STORE
         uses: actions/checkout@v4
