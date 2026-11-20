@@ -1,6 +1,5 @@
 #include <SDL2/SDL.h>
 #include <proto-include.h>
-#include <orbis/Sysmodule.h>
 #include "qrcodegen.hpp"
 
 #include <algorithm>
@@ -26,6 +25,9 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
+
+extern "C" int sceSysmoduleLoadModule(int moduleId);
+extern "C" int sceSysmoduleLoadModuleInternal(int moduleId);
 
 static const int SCREEN_W = 1920;
 static const int SCREEN_H = 1080;
@@ -698,7 +700,7 @@ static void refreshNetworkAddress(bool force=false)
     lastCheck=now;
 
     if(!moduleReady) {
-        int netResult=sceSysmoduleLoadModuleInternal(static_cast<OrbisSysModuleInternal>(0x8000001C));
+        int netResult=sceSysmoduleLoadModuleInternal(0x8000001C);
         if(netResult<0) {
             gOnline=false;
             return;
@@ -1014,7 +1016,7 @@ int main(int argc,char* argv[])
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_JOYSTICK)!=0) return 1;
     SDL_JoystickEventState(SDL_ENABLE);
 
-    if(sceSysmoduleLoadModule(static_cast<OrbisSysModule>(0x009A))<0) {
+    if(sceSysmoduleLoadModule(0x009A)<0) {
         std::printf("FreeType module load failed\n");
     } else if(FT_Init_FreeType(&gFtLibrary)==0) {
         if(FT_New_Face(gFtLibrary,"/app0/assets/Inter.ttf",0,&gFont)!=0)
