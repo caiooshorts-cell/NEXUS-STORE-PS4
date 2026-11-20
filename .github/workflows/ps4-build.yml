@@ -18,7 +18,7 @@ jobs:
       - name: Download official PS4 build tools and SDL2
         run: |
           set -eu
-          mkdir -p bundle/tools/bin/linux bundle/sdk
+          mkdir -p bundle/tools/bin/linux bundle/sdk bundle/qr bundle/assets
           curl -fL https://github.com/OpenOrbis/create-fself/releases/latest/download/binaries.tar.gz -o /tmp/create-fself.tar.gz
           tar -xzf /tmp/create-fself.tar.gz -C bundle/tools
           curl -fL https://github.com/OpenOrbis/create-gp4/releases/latest/download/binaries.tar.gz -o /tmp/create-gp4.tar.gz
@@ -27,6 +27,13 @@ jobs:
           unzip -o /tmp/pkgtool.zip -d bundle/tools/bin/linux
           curl -fL https://github.com/OpenOrbis/SDL-PS4/releases/latest/download/SDL2.tar.gz -o /tmp/SDL2.tar.gz
           tar -xzf /tmp/SDL2.tar.gz -C bundle/sdk
+          curl -fL https://raw.githubusercontent.com/nayuki/QR-Code-generator/master/cpp/qrcodegen.cpp -o bundle/qr/qrcodegen.cpp
+          curl -fL https://raw.githubusercontent.com/nayuki/QR-Code-generator/master/cpp/qrcodegen.hpp -o bundle/qr/qrcodegen.hpp
+          curl -fL 'https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf' -o bundle/assets/Inter.ttf
+          curl -fL https://raw.githubusercontent.com/google/fonts/main/ofl/inter/OFL.txt -o bundle/assets/OFL.txt
+          test -s bundle/qr/qrcodegen.cpp
+          test -s bundle/qr/qrcodegen.hpp
+          test -s bundle/assets/Inter.ttf
           chmod +x bundle/tools/bin/linux/create-fself bundle/tools/bin/linux/create-gp4 bundle/tools/bin/linux/PkgTool.Core
 
       - name: Generate NEXUS STORE package icon
@@ -102,6 +109,12 @@ jobs:
           test -n "$SDL_LIB"
           mkdir -p ps4/nexus_store/sce_sys ps4/nexus_store/sce_module
           cp build-inputs/icon0.png ps4/nexus_store/sce_sys/icon0.png
+          mkdir -p ps4/nexus_store/assets
+          cp build-inputs/qr/qrcodegen.cpp ps4/nexus_store/nexus_store/qrcodegen.cpp
+          cp build-inputs/qr/qrcodegen.hpp ps4/nexus_store/nexus_store/qrcodegen.hpp
+          cp build-inputs/assets/Inter.ttf ps4/nexus_store/assets/Inter.ttf
+          cp build-inputs/assets/OFL.txt ps4/nexus_store/assets/OFL.txt
+          cp connect.html ps4/nexus_store/connect.html
           for module in libc.prx libSceFios2.prx; do
             if [ -f "/lib/OpenOrbisSDK/bin/data/modules/$module" ]; then
               cp "/lib/OpenOrbisSDK/bin/data/modules/$module" ps4/nexus_store/sce_module/
