@@ -18,8 +18,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <cstdint>
-#include <orbis/libkernel.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -30,6 +28,7 @@
 
 extern "C" int sceSysmoduleLoadModule(int moduleId);
 extern "C" int sceSysmoduleLoadModuleInternal(int moduleId);
+extern "C" const char* sceKernelGetFsSandboxRandomWord(void);
 
 static const int SCREEN_W = 1920;
 static const int SCREEN_H = 1080;
@@ -420,48 +419,16 @@ static std::string bgftErrorCode(int rc)
     return code;
 }
 
-// Internal PS4 modules must be requested by their sysmodule ID. Loading
-// "/system/common/lib/libSceBgft.sprx" as an ordinary file returns ENOENT
-// on retail firmware. Once loaded, find the module handle and resolve exports.
-static int findLoadedNativeModule(const char* name)
+// Load a PS4 system library through the current application's sandbox path.
+static int loadSystemModuleFromSandbox(const char* fileName)
 {
-    OrbisKernelModule handles[256] = {};
-    size_t count = 0;
-    int rc = sceKernelGetModuleList(handles,sizeof(handles),&count);
-    if(rc!=0) return -1;
-    if(count>256) count=256;
+    const char* sandboxWord = sceKernelGetFsSandboxRandomWord();
+    if (!sandboxWord || !sandboxWord[0]) return -1;
 
-    for(size_t i=0;i<count;++i) {
-        OrbisKernelModuleInfo info;
-        memset(&info,0,sizeof(info));
-        info.size=sizeof(info);
-        if(sceKernelGetModuleInfo(handles[i],&info)!=0) continue;
-        if(strstr(info.name,name)!=NULL) return (int)handles[i];
-    }
-    return -1;
-}
-
-static bool loadInternalModule(int moduleId,const char* name,int& module,std::string& error)
-{
-    module=findLoadedNativeModule(name);
-    if(module>=0) return true;
-
-    int rc=sceSysmoduleLoadModuleInternal(moduleId);
-    if(rc!=0) {
-        // Check once more in case another system component loaded it while
-        // the sysmodule request was being processed.
-        module=findLoadedNativeModule(name);
-        if(module>=0) return true;
-        error=std::string("NAO FOI POSSIVEL CARREGAR ")+name+" PELO SYSMODULE: "+bgftErrorCode(rc);
-        return false;
-    }
-
-    module=findLoadedNativeModule(name);
-    if(module<0) {
-        error=std::string(name)+" FOI SOLICITADO, MAS NAO APARECEU NA LISTA DE MODULOS DO PS4.";
-        return false;
-    }
-    return true;
+    char path[256];
+    int n = snprintf(path, sizeof(path), "/%s/common/lib/%s", sandboxWord, fileName);
+    if (n <= 0 || (size_t)n >= sizeof(path)) return -1;
+    return sceKernelLoadStartModule(path, 0, NULL, 0, NULL, NULL);
 }
 
 template<typename T>
@@ -480,7 +447,11 @@ using AppInstUtilInitFn = int (*)();
 static bool initializeUserService(std::string& error)
 {
     if(gUserServiceInitialized) return true;
-    if(!loadInternalModule(0x80000011,"libSceUserService",gUserServiceModule,error)) return false;
+    gUserServiceModule = loadSystemModuleFromSandbox("libSceUserService.sprx");
+    if (gUserServiceModule < 0) {
+        error = "NAO FOI POSSIVEL CARREGAR O SERVICO DE USUARIO: " + bgftErrorCode(gUserServiceModule);
+        return false;
+    }
 
     UserServiceInitFn initialize=resolveBgftSymbol<UserServiceInitFn>(gUserServiceModule,"sceUserServiceInitialize");
     if(!initialize) {
@@ -499,7 +470,11 @@ static bool initializeUserService(std::string& error)
 static bool initializeAppInstUtil(std::string& error)
 {
     if(gAppInstUtilInitialized) return true;
-    if(!loadInternalModule(0x80000014,"libSceAppInstUtil",gAppInstUtilModule,error)) return false;
+    gAppInstUtilModule = loadSystemModuleFromSandbox("libSceAppInstUtil.sprx");
+    if (gAppInstUtilModule < 0) {
+        error = "NAO FOI POSSIVEL CARREGAR O SERVICO DE INSTALACAO: " + bgftErrorCode(gAppInstUtilModule);
+        return false;
+    }
 
     AppInstUtilInitFn initialize=resolveBgftSymbol<AppInstUtilInitFn>(gAppInstUtilModule,"sceAppInstUtilInitialize");
     if(!initialize) {
@@ -519,7 +494,11 @@ static bool initializeBgft(std::string& error)
 {
     std::lock_guard<std::mutex> lock(gBgftMutex);
     if(gBgftInitialized) return true;
-    if(!loadInternalModule(0x8000002A,"libSceBgft",gBgftModule,error)) return false;
+    gBgftModule = loadSystemModuleFromSandbox("libSceBgft.sprx");
+    if (gBgftModule < 0) {
+        error = "NAO FOI POSSIVEL CARREGAR O MODULO NATIVO BGFT: " + bgftErrorCode(gBgftModule);
+        return false;
+    }
 
     // OpenOrbis names this export sceBgftServiceIntInit (not sceBgftServiceInit).
     gBgftInit=resolveBgftSymbol<BgftInitFn>(gBgftModule,"sceBgftServiceIntInit");
