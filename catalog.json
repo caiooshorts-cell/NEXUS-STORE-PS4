@@ -1,6 +1,18 @@
 {
   "schemaVersion": 1,
   "storeName": "NEXUS STORE",
-  "updatedAt": "2026-11-19T00:00:00Z",
-  "items": []
+  "updatedAt": "2026-11-20T01:45:07.840Z",
+  "items": [
+    {
+      "id": "8b186709-1879-4cae-91ad-4eda80386730",
+      "name": "hunting",
+      "version": "",
+      "category": "Jogos homebrew",
+      "image": "",
+      "url": "https://stor13.mochaprox.li/4d87rnqUeezcxm1EP5WJ8/%5BSPSX%5D-Hunting.Simulator-CUSA07164-EUR-Game-PS4.pkg?token=i_4W2VIC8PgBqBvOnSKZLS5CVCpioWVJ_rIYB37Brn4&expires=1795225472",
+      "description": "",
+      "sha256": null,
+      "sizeBytes": null
+    }
+  ]
 }
