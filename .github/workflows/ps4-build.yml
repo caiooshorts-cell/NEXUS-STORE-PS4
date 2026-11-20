@@ -18,16 +18,16 @@ jobs:
       - name: Download official OpenOrbis sample
         run: |
           set -eu
-          mkdir -p bundle/ps4/smoke-test
+          mkdir -p bundle/ps4/hello_world
           curl -fL https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/archive/refs/heads/master.tar.gz -o /tmp/openorbis.tar.gz
           tar -xzf /tmp/openorbis.tar.gz -C /tmp
-          cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/hello_world/. bundle/ps4/smoke-test/
+          cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/hello_world/. bundle/ps4/hello_world/
 
       - name: Upload sample source
         uses: actions/upload-artifact@v4
         with:
           name: openorbis-sample-source
-          path: bundle/ps4/smoke-test/
+          path: bundle/ps4/hello_world/
           if-no-files-found: error
           retention-days: 1
 
@@ -45,14 +45,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: openorbis-sample-source
-          path: ps4/smoke-test
+          path: ps4/hello_world
 
       - name: Compile sample and create PKG
         run: |
           set -eu
-          make -C ps4/smoke-test
+          make -C ps4/hello_world
           mkdir -p dist
-          find ps4/smoke-test -maxdepth 1 -type f -name '*.pkg' -exec cp {} dist/ \;
+          find ps4/hello_world -maxdepth 1 -type f -name '*.pkg' -exec cp {} dist/ \;
           test -n "$(find dist -maxdepth 1 -type f -name '*.pkg' -print -quit)"
 
       - name: Upload smoke-test PKG
