@@ -18,6 +18,9 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <cstdint>
+#include <orbis/libkernel.h>
+#include <orbis/UserService.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -32,7 +35,6 @@ extern "C" int sceSysmoduleLoadModuleInternal(int moduleId);
 static const int SCREEN_W = 1920;
 static const int SCREEN_H = 1080;
 static const int PHONE_PORT = 8765;
-static const int RPI_PORT = 12800;
 static const char* JOB_FILE = "/data/nexus-store-downloads.txt";
 
 static const SDL_Color BG       = { 5, 12, 24, 255 };
@@ -92,6 +94,40 @@ static std::string gPairUrl;
 static qrcodegen::QrCode* gQrCode = NULL;
 static std::string gLastMessage = "PRONTO PARA CONECTAR";
 static bool gOnline = false;
+static std::mutex gBgftMutex;
+static int gBgftModule = -1;
+static bool gBgftInitialized = false;
+static std::vector<unsigned char> gBgftHeap;
+
+struct BgftInitParams {
+    void* heap;
+    size_t heapSize;
+};
+struct BgftDownloadParams {
+    int32_t userId;
+    int32_t entitlementType;
+    const char* id;
+    const char* contentUrl;
+    const char* contentExUrl;
+    const char* contentName;
+    const char* iconPath;
+    const char* skuId;
+    int32_t option;
+    const char* playgoScenarioId;
+    const char* releaseDate;
+    const char* packageType;
+    const char* packageSubType;
+    uint64_t packageSize;
+};
+static_assert(offsetof(BgftDownloadParams, packageSize) == 96, "BGFT parameter ABI mismatch");
+static_assert(sizeof(BgftDownloadParams) == 104, "BGFT parameter ABI mismatch");
+
+using BgftInitFn = int (*)(BgftInitParams*);
+using BgftRegisterPkgFn = int (*)(BgftDownloadParams*, int*);
+using BgftStartTaskFn = int (*)(int);
+static BgftInitFn gBgftInit = NULL;
+static BgftRegisterPkgFn gBgftRegisterPkg = NULL;
+static BgftStartTaskFn gBgftStartTask = NULL;
 static int gSelectedNav = 0;
 static int gSelectedDownload = 0;
 static SDL_Joystick* gController = NULL;
@@ -374,71 +410,103 @@ static bool sendAll(int fd, const char* data, size_t length)
     return true;
 }
 
-static bool postLocalInstaller(const std::string& path, const std::string& body, std::string& response)
+static std::string bgftErrorCode(int rc)
 {
-    int fd=socket(AF_INET,SOCK_STREAM,0);
-    if(fd<0) return false;
-    struct timeval timeout;
-    timeout.tv_sec=6; timeout.tv_usec=0;
-    setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
-    struct sockaddr_in addr;
-    memset(&addr,0,sizeof(addr));
-    addr.sin_family=AF_INET;
-    addr.sin_port=htons(RPI_PORT);
-    addr.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
-    if(connect(fd,(struct sockaddr*)&addr,sizeof(addr))<0) {
-        close(fd);
+    char code[16];
+    snprintf(code,sizeof(code),"0x%08X",(unsigned int)rc);
+    return code;
+}
+
+template<typename T>
+static T resolveBgftSymbol(int module,const char* name)
+{
+    T function=NULL;
+    int rc=sceKernelDlsym(module,name,reinterpret_cast<void**>(&function));
+    if(rc!=0 || !function) return NULL;
+    return function;
+}
+
+static bool initializeBgft(std::string& error)
+{
+    std::lock_guard<std::mutex> lock(gBgftMutex);
+    if(gBgftInitialized) return true;
+
+    gBgftModule=sceKernelLoadStartModule("/system/common/lib/libSceBgft.sprx",0,NULL,0,NULL,NULL);
+    if(gBgftModule<0) {
+        error="NAO FOI POSSIVEL CARREGAR O SERVICO NATIVO BGFT: "+bgftErrorCode(gBgftModule);
         return false;
     }
-    std::ostringstream header;
-    header<<"POST "<<path<<" HTTP/1.1\r\n"
-          <<"Host: 127.0.0.1:"<<RPI_PORT<<"\r\n"
-          <<"Content-Type: application/json\r\n"
-          <<"Content-Length: "<<body.size()<<"\r\n"
-          <<"Connection: close\r\n\r\n";
-    std::string wire=header.str()+body;
-    bool wrote=sendAll(fd,wire.c_str(),wire.size());
-    if(!wrote) { close(fd); return false; }
-    char buffer[4096];
-    response.clear();
-    while(response.size()<65536) {
-        int n=(int)recv(fd,buffer,sizeof(buffer),0);
-        if(n<=0) break;
-        response.append(buffer,n);
+
+    gBgftInit=resolveBgftSymbol<BgftInitFn>(gBgftModule,"sceBgftServiceInit");
+    gBgftRegisterPkg=resolveBgftSymbol<BgftRegisterPkgFn>(gBgftModule,"sceBgftServiceIntDebugDownloadRegisterPkg");
+    gBgftStartTask=resolveBgftSymbol<BgftStartTaskFn>(gBgftModule,"sceBgftServiceDownloadStartTask");
+    if(!gBgftInit || !gBgftRegisterPkg || !gBgftStartTask) {
+        error="O BGFT DO PS4 NAO EXPOS OS METODOS NECESSARIOS.";
+        return false;
     }
-    close(fd);
-    size_t lineEnd=response.find("\r\n");
-    if(lineEnd==std::string::npos) return false;
-    std::string first=response.substr(0,lineEnd);
-    size_t sp=first.find(' ');
-    if(sp==std::string::npos || sp+4>first.size()) return false;
-    int status=atoi(first.substr(sp+1,3).c_str());
-    return status>=200 && status<300;
+
+    gBgftHeap.assign(1024*1024,0);
+    BgftInitParams initParams;
+    initParams.heap=gBgftHeap.data();
+    initParams.heapSize=gBgftHeap.size();
+    int rc=gBgftInit(&initParams);
+    if(rc!=0) {
+        error="FALHA AO INICIAR O BGFT: "+bgftErrorCode(rc);
+        return false;
+    }
+    gBgftInitialized=true;
+    return true;
 }
 
-static bool submitInstall(const std::string& url, std::string& installerResponse)
+// Registra a URL diretamente no serviço de downloads/instalação do sistema.
+// Não usa Remote Package Installer nem a porta TCP 12800.
+static bool submitInstall(const std::string& url,const std::string& packageName,std::string& result)
 {
-    std::string escaped=jsonEscape(url);
-    std::string v2Body="{\"url\":\""+escaped+"\"}";
-    if(postLocalInstaller("/api/v2/install",v2Body,installerResponse))
-        return true;
+    if(!initializeBgft(result)) return false;
 
-    std::string legacyBody="{\"type\":\"direct\",\"packages\":[\""+escaped+"\"]}";
-    return postLocalInstaller("/api/install",legacyBody,installerResponse);
-}
+    int userId=-1;
+    int userResult=sceUserServiceGetForegroundUser(&userId);
+    if(userResult!=0 || userId<0) {
+        result="ENTRE EM UM PERFIL DO PS4 ANTES DE INSTALAR.";
+        return false;
+    }
 
-static std::string extractContentId(const std::string& response)
-{
-    size_t at=response.find("\"content_id\"");
-    if(at==std::string::npos) at=response.find("\"contentId\"");
-    if(at==std::string::npos) return "";
-    at=response.find(':',at);
-    if(at==std::string::npos) return "";
-    at=response.find('"',at);
-    if(at==std::string::npos) return "";
-    size_t end=response.find('"',at+1);
-    if(end==std::string::npos) return "";
-    return response.substr(at+1,end-at-1);
+    BgftDownloadParams params;
+    memset(&params,0,sizeof(params));
+    params.userId=userId;
+    params.entitlementType=5;
+    params.id="";
+    params.contentUrl=url.c_str();
+    params.contentExUrl="";
+    params.contentName=packageName.c_str();
+    params.iconPath="";
+    params.skuId="";
+    params.option=0x10000;
+    params.playgoScenarioId="0";
+    params.releaseDate="";
+    params.packageType="";
+    params.packageSubType="";
+    params.packageSize=0;
+
+    int taskId=-1;
+    int rc=gBgftRegisterPkg(&params,&taskId);
+    if(rc!=0) {
+        result="O PS4 RECUSOU O REGISTRO DO PKG: "+bgftErrorCode(rc);
+        return false;
+    }
+    if(taskId<0) {
+        result="O BGFT NAO RETORNOU UM ID DE DOWNLOAD VALIDO.";
+        return false;
+    }
+
+    rc=gBgftStartTask(taskId);
+    if(rc!=0) {
+        result="NAO FOI POSSIVEL INICIAR O DOWNLOAD NATIVO: "+bgftErrorCode(rc);
+        return false;
+    }
+
+    result="TAREFA NATIVA BGFT #"+std::to_string(taskId);
+    return true;
 }
 
 static void saveJob(const InstallJob& job)
@@ -466,19 +534,10 @@ static void loadJobs()
         job.update=s.substr(a+1,b-a-1)=="1";
         job.name=s.substr(b+1,c-b-1);
         job.url=s.substr(c+1);
-        job.state="ENVIADO AO INSTALADOR";
+        job.state="DOWNLOAD NATIVO INICIADO";
         gJobs.push_back(job);
     }
     fclose(f);
-}
-
-static std::string responseMessage(const std::string& response)
-{
-    size_t body=response.find("\r\n\r\n");
-    if(body==std::string::npos) return "SOLICITACAO ENVIADA";
-    std::string b=response.substr(body+4);
-    if(b.size()>180) b=b.substr(0,180);
-    return b;
 }
 
 static bool enqueueUrl(const std::string& url, std::string& message)
@@ -495,26 +554,24 @@ static bool enqueueUrl(const std::string& url, std::string& message)
     }
 
     std::string installerResponse;
-    if(!submitInstall(url,installerResponse)) {
-        message="SERVICO DE INSTALACAO NAO ENCONTRADO. ATIVE O REMOTE PACKAGE INSTALL DO GOLDHEN OU ABRA O REMOTE PKG INSTALLER.";
+    std::string packageName=friendlyName(url);
+    if(!submitInstall(url,packageName,installerResponse)) {
+        message=installerResponse.empty()?"FALHA AO INICIAR A INSTALACAO NATIVA. VERIFIQUE SE O GOLDHEN ESTA ATIVO.":installerResponse;
         return false;
     }
 
     InstallJob job;
-    job.name=friendlyName(url);
+    job.name=packageName;
     job.url=url;
     job.titleId=titleIdFromText(url);
-    std::string contentId=extractContentId(installerResponse);
-    std::string responseId=titleIdFromText(contentId);
-    if(!responseId.empty()) job.titleId=responseId;
-    job.update=looksLikeUpdate(url) || contentId.find("UP") == 0;
-    job.state="ENVIADO AO INSTALADOR";
+    job.update=looksLikeUpdate(url);
+    job.state="DOWNLOAD NATIVO INICIADO";
     {
         std::lock_guard<std::mutex> lock(gJobsMutex);
         gJobs.push_back(job);
     }
     saveJob(job);
-    message="PACOTE ENVIADO AO INSTALADOR DO PS4";
+    message="DOWNLOAD INICIADO PELO INSTALADOR NATIVO DO PS4";
     return true;
 }
 
