@@ -114,8 +114,8 @@ jobs:
           make -C ps4/nexus_store clean
           make -C ps4/nexus_store
           mkdir -p dist
-          find ps4/nexus_store -maxdepth 1 -type f -name '*.pkg' -exec cp {} dist/ \\;
-          test -n "$(find dist -maxdepth 1 -type f -name '*.pkg' -print -quit)"
+          cp ps4/nexus_store/*.pkg dist/
+          test -s dist/IV0000-NXUS00001_00-NEXUSSTORE000000.pkg
           ls -lh dist/*.pkg
 
       - name: Upload NEXUS STORE PKG
