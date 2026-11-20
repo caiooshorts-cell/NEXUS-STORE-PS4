@@ -29,6 +29,8 @@
 extern "C" int sceSysmoduleLoadModule(int moduleId);
 extern "C" int sceSysmoduleLoadModuleInternal(int moduleId);
 extern "C" const char* sceKernelGetFsSandboxRandomWord(void);
+extern "C" int32_t sceKernelLoadStartModule(const char*, size_t, const void*, uint32_t, void*, void*);
+extern "C" int32_t sceKernelDlsym(int32_t, const char*, void**);
 
 static const int SCREEN_W = 1920;
 static const int SCREEN_H = 1080;
