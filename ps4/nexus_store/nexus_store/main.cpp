@@ -698,7 +698,7 @@ static void refreshNetworkAddress(bool force=false)
     lastCheck=now;
 
     if(!moduleReady) {
-        int netResult=sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
+        int netResult=sceSysmoduleLoadModuleInternal(static_cast<OrbisSysModuleInternal>(0x8000001C));
         if(netResult<0) {
             gOnline=false;
             return;
@@ -1014,7 +1014,7 @@ int main(int argc,char* argv[])
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_JOYSTICK)!=0) return 1;
     SDL_JoystickEventState(SDL_ENABLE);
 
-    if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_FREETYPE_OL)<0) {
+    if(sceSysmoduleLoadModule(static_cast<OrbisSysModule>(0x009A))<0) {
         std::printf("FreeType module load failed\n");
     } else if(FT_Init_FreeType(&gFtLibrary)==0) {
         if(FT_New_Face(gFtLibrary,"/app0/assets/Inter.ttf",0,&gFont)!=0)
