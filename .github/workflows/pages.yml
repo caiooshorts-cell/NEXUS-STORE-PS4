@@ -1,3 +1,4 @@
+
 name: Publicar NEXUS STORE
 
 on:
@@ -32,8 +33,11 @@ jobs:
       - name: Enviar site
         uses: actions/upload-pages-artifact@v3
         with:
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: public
 
       - name: Publicar
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
