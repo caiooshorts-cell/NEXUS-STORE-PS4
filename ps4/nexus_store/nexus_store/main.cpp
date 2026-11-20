@@ -1,8 +1,6 @@
 #include <SDL2/SDL.h>
 #include <proto-include.h>
 #include <orbis/Sysmodule.h>
-#include <orbis/Net.h>
-#include <orbis/NetCtl.h>
 #include "qrcodegen.hpp"
 
 #include <algorithm>
@@ -689,21 +687,50 @@ static void phoneServerLoop()
     gServerReady=false;
 }
 
-static void refreshNetworkAddress()
+static void createPairingQr();
+
+static void refreshNetworkAddress(bool force=false)
 {
-    if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET)<0) return;
-    if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NETCTL)<0) return;
-    sceNetInit();
-    sceNetCtlInit();
-    OrbisNetCtlInfo info;
-    memset(&info,0,sizeof(info));
-    if(sceNetCtlGetInfo(ORBIS_NET_CTL_INFO_IP_ADDRESS,&info)>=0) {
-        if(info.ip_address[0] && strcmp(info.ip_address,"0.0.0.0")!=0)
-            gIpAddress=info.ip_address;
-        else
-            gIpAddress="IP NAO DISPONIVEL";
+    static Uint32 lastCheck=0;
+    static bool moduleReady=false;
+    Uint32 now=SDL_GetTicks();
+    if(!force && (Uint32)(now-lastCheck)<3000) return;
+    lastCheck=now;
+
+    if(!moduleReady) {
+        int netResult=sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
+        if(netResult<0) {
+            gOnline=false;
+            return;
+        }
+        moduleReady=true;
     }
-    gOnline=gIpAddress!="IP NAO DISPONIVEL";
+
+    std::string previousIp=gIpAddress;
+    int fd=socket(AF_INET,SOCK_DGRAM,0);
+    if(fd>=0) {
+        struct sockaddr_in remote;
+        memset(&remote,0,sizeof(remote));
+        remote.sin_family=AF_INET;
+        remote.sin_port=htons(53);
+        inet_pton(AF_INET,"8.8.8.8",&remote.sin_addr);
+        if(connect(fd,(struct sockaddr*)&remote,sizeof(remote))==0) {
+            struct sockaddr_in local;
+            socklen_t localLen=sizeof(local);
+            memset(&local,0,sizeof(local));
+            if(getsockname(fd,(struct sockaddr*)&local,&localLen)==0) {
+                char address[INET_ADDRSTRLEN];
+                if(inet_ntop(AF_INET,&local.sin_addr,address,sizeof(address)) &&
+                   strcmp(address,"0.0.0.0")!=0)
+                    gIpAddress=address;
+            }
+        }
+        close(fd);
+    }
+
+    gOnline=(gIpAddress!="IP NAO DISPONIVEL");
+    if(gIpAddress!=previousIp && !gPairKey.empty())
+        createPairingQr();
 }
 
 static void createPairingQr()
@@ -1002,8 +1029,8 @@ int main(int argc,char* argv[])
 
     if(SDL_NumJoysticks()>0) gController=SDL_JoystickOpen(0);
 
-    refreshNetworkAddress();
     gPairKey="";
+    refreshNetworkAddress(true);
     createPairingQr();
     loadJobs();
 
@@ -1014,7 +1041,7 @@ int main(int argc,char* argv[])
     while(running) {
         SDL_Event e;
         while(SDL_PollEvent(&e)) handleNavigation(e,running);
-        refreshNetworkAddress();
+        refreshNetworkAddress(false);
         render(gRenderer);
         SDL_UpdateWindowSurface(gWindow);
         SDL_Delay(16);
