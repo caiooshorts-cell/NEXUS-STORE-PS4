@@ -15,7 +15,7 @@ jobs:
   prepare-sample:
     runs-on: ubuntu-latest
     steps:
-      - name: Download official OpenOrbis sample, headers and create-fself
+      - name: Download official OpenOrbis sample, shared headers and build tools
         run: |
           set -eu
           mkdir -p bundle/ps4/hello_world bundle/ps4/_common bundle/tools
@@ -23,12 +23,21 @@ jobs:
           tar -xzf /tmp/openorbis.tar.gz -C /tmp
           cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/hello_world/. bundle/ps4/hello_world/
           cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/_common/. bundle/ps4/_common/
-          curl -fL https://github.com/OpenOrbis/create-fself/releases/download/v1.3/binaries.tar.gz -o /tmp/create-fself.tar.gz
-          tar -xzf /tmp/create-fself.tar.gz -C bundle/tools
-          test -f bundle/tools/bin/linux/create-fself
-          chmod +x bundle/tools/bin/linux/create-fself
 
-      - name: Upload sample source and build tool
+          curl -fL https://github.com/OpenOrbis/create-fself/releases/latest/download/binaries.tar.gz -o /tmp/create-fself.tar.gz
+          tar -xzf /tmp/create-fself.tar.gz -C bundle/tools
+
+          curl -fL https://github.com/OpenOrbis/create-gp4/releases/latest/download/binaries.tar.gz -o /tmp/create-gp4.tar.gz
+          tar -xzf /tmp/create-gp4.tar.gz -C bundle/tools
+
+          curl -fL https://github.com/maxton/LibOrbisPkg/releases/download/v0.2/PkgTool.Core-linux-x64-0.2.231.zip -o /tmp/pkgtool.zip
+          unzip -o /tmp/pkgtool.zip -d bundle/tools/bin/linux
+          chmod +x bundle/tools/bin/linux/create-fself bundle/tools/bin/linux/create-gp4 bundle/tools/bin/linux/PkgTool.Core
+          test -f bundle/tools/bin/linux/create-fself
+          test -f bundle/tools/bin/linux/create-gp4
+          test -f bundle/tools/bin/linux/PkgTool.Core
+
+      - name: Upload sample source and build tools
         uses: actions/upload-artifact@v4
         with:
           name: openorbis-build-inputs
@@ -46,18 +55,21 @@ jobs:
       - name: Checkout NEXUS STORE
         uses: actions/checkout@v4
 
-      - name: Download prepared source and build tool
+      - name: Download prepared source and build tools
         uses: actions/download-artifact@v4
         with:
           name: openorbis-build-inputs
           path: build-inputs
 
-      - name: Install missing official create-fself tool
+      - name: Install official OpenOrbis build tools
         run: |
           set -eu
-          mkdir -p ps4
+          mkdir -p ps4 /lib/OpenOrbisSDK/bin/linux
           cp -R build-inputs/ps4/. ps4/
-          install -D -m 0755 build-inputs/tools/bin/linux/create-fself /lib/OpenOrbisSDK/bin/linux/create-fself
+          install -m 0755 build-inputs/tools/bin/linux/create-fself /lib/OpenOrbisSDK/bin/linux/create-fself
+          install -m 0755 build-inputs/tools/bin/linux/create-gp4 /lib/OpenOrbisSDK/bin/linux/create-gp4
+          cp -R build-inputs/tools/bin/linux/. /lib/OpenOrbisSDK/bin/linux/
+          chmod +x /lib/OpenOrbisSDK/bin/linux/create-fself /lib/OpenOrbisSDK/bin/linux/create-gp4 /lib/OpenOrbisSDK/bin/linux/PkgTool.Core
           test -x /lib/OpenOrbisSDK/bin/linux/create-fself
           test -x /lib/OpenOrbisSDK/bin/linux/create-gp4
           test -x /lib/OpenOrbisSDK/bin/linux/PkgTool.Core
