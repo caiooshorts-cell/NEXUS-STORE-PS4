@@ -1,0 +1,38 @@
+name: PS4 homebrew build check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ps4/**"
+      - ".github/workflows/ps4-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  toolchain-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout NEXUS STORE
+        uses: actions/checkout@v4
+
+      - name: Build official OpenOrbis Hello World sample
+        uses: OpenOrbis/toolchain-action@main
+        with:
+          version: v0.5.1
+          command: |
+            set -e
+            cd "$OO_PS4_TOOLCHAIN/samples/hello_world"
+            make
+            mkdir -p "$GITHUB_WORKSPACE/dist"
+            cp ./*.pkg "$GITHUB_WORKSPACE/dist/"
+
+      - name: Upload smoke-test PKG
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-store-openorbis-smoke-test
+          path: dist/*.pkg
+          if-no-files-found: error
+          retention-days: 7
