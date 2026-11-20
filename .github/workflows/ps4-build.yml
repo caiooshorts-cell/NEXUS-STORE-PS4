@@ -15,19 +15,20 @@ jobs:
   prepare-sample:
     runs-on: ubuntu-latest
     steps:
-      - name: Download official OpenOrbis sample
+      - name: Download official OpenOrbis sample and shared headers
         run: |
           set -eu
-          mkdir -p bundle/ps4/hello_world
+          mkdir -p bundle/ps4/hello_world bundle/ps4/_common
           curl -fL https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/archive/refs/heads/master.tar.gz -o /tmp/openorbis.tar.gz
           tar -xzf /tmp/openorbis.tar.gz -C /tmp
           cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/hello_world/. bundle/ps4/hello_world/
+          cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/_common/. bundle/ps4/_common/
 
       - name: Upload sample source
         uses: actions/upload-artifact@v4
         with:
           name: openorbis-sample-source
-          path: bundle/ps4/hello_world/
+          path: bundle/ps4/
           if-no-files-found: error
           retention-days: 1
 
@@ -45,7 +46,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: openorbis-sample-source
-          path: ps4/hello_world
+          path: ps4
 
       - name: Compile sample and create PKG
         run: |
