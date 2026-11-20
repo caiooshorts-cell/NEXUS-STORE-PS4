@@ -14,20 +14,26 @@ permissions:
 jobs:
   toolchain-smoke-test:
     runs-on: ubuntu-latest
+    container:
+      image: openorbisofficial/toolchain:latest
     steps:
       - name: Checkout NEXUS STORE
         uses: actions/checkout@v4
 
-      - name: Build official OpenOrbis Hello World sample
-        uses: OpenOrbis/toolchain-action@main
-        with:
-          version: v0.5.1
-          command: |
-            set -e
-            cd "$OO_PS4_TOOLCHAIN/samples/hello_world"
-            make
-            mkdir -p "$GITHUB_WORKSPACE/dist"
-            cp ./*.pkg "$GITHUB_WORKSPACE/dist/"
+      - name: Fetch official OpenOrbis sample
+        run: |
+          set -eu
+          git clone --depth 1 https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain.git /tmp/openorbis
+          mkdir -p ps4/smoke-test
+          cp -R /tmp/openorbis/samples/hello_world/. ps4/smoke-test/
+
+      - name: Compile sample and create PKG
+        run: |
+          set -eu
+          cd ps4/smoke-test
+          make
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp ./*.pkg "$GITHUB_WORKSPACE/dist/"
 
       - name: Upload smoke-test PKG
         uses: actions/upload-artifact@v4
