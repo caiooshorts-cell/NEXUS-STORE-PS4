@@ -23,6 +23,7 @@ jobs:
           tar -xzf /tmp/openorbis.tar.gz -C /tmp
           cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/hello_world/. bundle/ps4/hello_world/
           cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/_common/. bundle/ps4/_common/
+          sed -i 's/eboot.bin sce_sys\\/about\\/right.sprx /eboot.bin /' bundle/ps4/hello_world/Makefile
 
           curl -fL https://github.com/OpenOrbis/create-fself/releases/latest/download/binaries.tar.gz -o /tmp/create-fself.tar.gz
           tar -xzf /tmp/create-fself.tar.gz -C bundle/tools
