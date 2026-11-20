@@ -746,7 +746,7 @@ static void createPairingQr()
     snprintf(token,sizeof(token),"%08X%08X",(unsigned int)std::rand(),(unsigned int)std::rand());
     gPairKey=token;
     std::string server="http://"+gIpAddress+":"+std::to_string(PHONE_PORT);
-    gPairUrl="https://caiooshorts-cell.github.io/NEXUS-STORE-PS4/?server="+urlEncode(server)+"&key="+gPairKey;
+    gPairUrl=server+"/?key="+gPairKey;
     try {
         gQrCode=new qrcodegen::QrCode(qrcodegen::QrCode::encodeText(gPairUrl.c_str(),qrcodegen::QrCode::Ecc::MEDIUM));
     } catch(...) {
