@@ -15,20 +15,24 @@ jobs:
   prepare-sample:
     runs-on: ubuntu-latest
     steps:
-      - name: Download official OpenOrbis sample and shared headers
+      - name: Download official OpenOrbis sample, headers and create-fself
         run: |
           set -eu
-          mkdir -p bundle/ps4/hello_world bundle/ps4/_common
+          mkdir -p bundle/ps4/hello_world bundle/ps4/_common bundle/tools
           curl -fL https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/archive/refs/heads/master.tar.gz -o /tmp/openorbis.tar.gz
           tar -xzf /tmp/openorbis.tar.gz -C /tmp
           cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/hello_world/. bundle/ps4/hello_world/
           cp -R /tmp/OpenOrbis-PS4-Toolchain-master/samples/_common/. bundle/ps4/_common/
+          curl -fL https://github.com/OpenOrbis/create-fself/releases/download/v1.3/binaries.tar.gz -o /tmp/create-fself.tar.gz
+          tar -xzf /tmp/create-fself.tar.gz -C bundle/tools
+          test -f bundle/tools/bin/linux/create-fself
+          chmod +x bundle/tools/bin/linux/create-fself
 
-      - name: Upload sample source
+      - name: Upload sample source and build tool
         uses: actions/upload-artifact@v4
         with:
-          name: openorbis-sample-source
-          path: bundle/ps4/
+          name: openorbis-build-inputs
+          path: bundle/
           if-no-files-found: error
           retention-days: 1
 
@@ -42,11 +46,21 @@ jobs:
       - name: Checkout NEXUS STORE
         uses: actions/checkout@v4
 
-      - name: Download prepared sample
+      - name: Download prepared source and build tool
         uses: actions/download-artifact@v4
         with:
-          name: openorbis-sample-source
-          path: ps4
+          name: openorbis-build-inputs
+          path: build-inputs
+
+      - name: Install missing official create-fself tool
+        run: |
+          set -eu
+          mkdir -p ps4
+          cp -R build-inputs/ps4/. ps4/
+          install -D -m 0755 build-inputs/tools/bin/linux/create-fself /lib/OpenOrbisSDK/bin/linux/create-fself
+          test -x /lib/OpenOrbisSDK/bin/linux/create-fself
+          test -x /lib/OpenOrbisSDK/bin/linux/create-gp4
+          test -x /lib/OpenOrbisSDK/bin/linux/PkgTool.Core
 
       - name: Compile sample and create PKG
         run: |
