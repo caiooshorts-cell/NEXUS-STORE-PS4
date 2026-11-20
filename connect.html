@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#071321">
+<title>NEXUS STORE • Conectar</title>
+<style>
+:root{color-scheme:dark;--bg:#071321;--panel:#102237;--panel2:#142d45;--line:#294660;--cyan:#38c2e8;--mint:#4be0b4;--text:#edf6ff;--muted:#9ab0c4}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 85% 0%,#174b65 0,transparent 38%),var(--bg);color:var(--text);font:16px Inter,system-ui,Segoe UI,sans-serif;display:flex;justify-content:center;align-items:center;padding:22px}
+main{width:min(100%,540px)}.brand{display:flex;align-items:center;gap:14px;margin:0 0 24px}.logo{width:54px;height:54px;border-radius:18px;background:linear-gradient(140deg,#42d0ec,#1676ad);display:grid;place-items:center;color:#061a28;font-weight:900;font-size:28px;box-shadow:0 12px 36px #0c82944a}.brand h1{margin:0;font-size:23px;letter-spacing:1.6px}.brand p{margin:5px 0 0;color:var(--muted);font-size:12px;letter-spacing:2px}
+.card{border:1px solid var(--line);border-radius:26px;background:linear-gradient(160deg,#142c43,#0e1f32);padding:25px;box-shadow:0 24px 80px #0005}h2{margin:0 0 10px;font-size:22px}p{color:var(--muted);line-height:1.55;margin:0 0 22px}.field label{display:block;color:#c1d5e6;font-size:13px;margin:0 0 9px}.field input{width:100%;height:58px;border-radius:16px;border:1px solid #3a617c;background:#071725;color:var(--text);padding:0 16px;font:inherit;outline:none}.field input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px #38c2e82c}.preview{display:none;margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:14px;color:var(--muted);font-size:13px;overflow-wrap:anywhere}.button{width:100%;margin-top:17px;border:0;border-radius:16px;height:58px;background:linear-gradient(100deg,#2db9e4,#51ddb5);color:#061923;font:700 16px inherit;font-weight:800;cursor:pointer}.button:disabled{opacity:.55;cursor:wait}.status{display:none;margin-top:16px;padding:15px;border-radius:16px;background:#071725;border:1px solid var(--line);line-height:1.5;overflow-wrap:anywhere}.status.ok{border-color:#246d5a;color:#7ce7c2}.status.bad{border-color:#87494b;color:#ffb6b6}.foot{margin:18px 4px 0;text-align:center;font-size:12px;color:#7892a9}.hidden{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<header class="brand"><div class="logo">N</div><div><h1>NEXUS STORE</h1><p>CONEXAO COM O PLAYSTATION 4</p></div></header>
+<section class="card">
+  <h2>Enviar pacote para o PS4</h2>
+  <p id="intro">Cole o link direto de um arquivo PKG. O nome e o tamanho serao detectados automaticamente pelo instalador.</p>
+  <div id="pairError" class="status bad">Abra esta pagina escaneando o QR code exibido na aba CONECTAR da NEXUS STORE no PS4.</div>
+  <form id="sendForm">
+    <div class="field">
+      <label for="pkgUrl">LINK DIRETO DO PKG</label>
+      <input id="pkgUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://servidor.com/arquivo.pkg" required>
+    </div>
+    <div class="preview" id="filename"></div>
+    <button class="button" id="sendButton" type="submit">ENVIAR PARA INSTALAR</button>
+  </form>
+  <div class="status" id="status"></div>
+</section>
+<div class="foot">O celular e o PS4 precisam estar na mesma rede Wi-Fi.</div>
+</main>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const server = params.get("server") || "";
+  const key = params.get("key") || "";
+  const form = document.getElementById("sendForm");
+  const input = document.getElementById("pkgUrl");
+  const preview = document.getElementById("filename");
+  const status = document.getElementById("status");
+  const button = document.getElementById("sendButton");
+  const pairError = document.getElementById("pairError");
+
+  function validPair() {
+    try {
+      const u = new URL(server);
+      return (u.protocol === "http:" || u.protocol === "https:") && key.length >= 8;
+    } catch (_) { return false; }
+  }
+  if (!validPair()) {
+    form.classList.add("hidden");
+    pairError.style.display = "block";
+  }
+
+  input.addEventListener("input", () => {
+    try {
+      const u = new URL(input.value);
+      const file = decodeURIComponent(u.pathname.split("/").pop() || "arquivo.pkg");
+      preview.textContent = "PACOTE DETECTADO: " + file;
+      preview.style.display = "block";
+    } catch (_) {
+      preview.style.display = "none";
+    }
+  });
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    status.className = "status";
+    status.style.display = "block";
+    const url = input.value.trim();
+    if (!/^https?:\/\//i.test(url) || !/\.pkg(?:$|[?#])/i.test(url)) {
+      status.classList.add("bad");
+      status.textContent = "Use um link HTTP/HTTPS que aponte para um arquivo .pkg.";
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "ENVIANDO...";
+    try {
+      const response = await fetch(server.replace(/\/$/,"") + "/api/queue?key=" + encodeURIComponent(key), {
+        method: "POST",
+        headers: {"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"},
+        body: new URLSearchParams({url})
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.message || "O PS4 recusou a solicitacao.");
+      status.classList.add("ok");
+      status.textContent = "✓ " + result.message + ". Acompanhe a instalacao na aba DOWNLOADS da NEXUS STORE.";
+      input.value = "";
+      preview.style.display = "none";
+    } catch (error) {
+      status.classList.add("bad");
+      status.textContent = error.message || "Falha ao conectar com o PS4. Confira a mesma rede Wi-Fi.";
+    } finally {
+      button.disabled = false;
+      button.textContent = "ENVIAR PARA INSTALAR";
+    }
+  });
+})();
+</script>
+</body>
+</html>
